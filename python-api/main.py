@@ -41,7 +41,7 @@ def _credentials() -> tuple[str, str, str]:
     signing_secret = os.getenv("CONVERTLY_JOB_SIGNING_SECRET", "").strip()
     base_url = os.getenv("CLOUDCONVERT_BASE_URL", "https://api.cloudconvert.com/v2").rstrip("/")
     if not api_key or not signing_secret:
-        raise HTTPException(status_code=503, detail="L’API de conversion n’est pas encore configurée.")
+        raise HTTPException(status_code=503, detail="The conversion API is not configured yet.")
     return api_key, signing_secret, base_url
 
 
@@ -60,12 +60,12 @@ async def _cloudconvert_request(method: str, url: str, **kwargs):
                 **kwargs,
             )
     except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail="CloudConvert est temporairement inaccessible.") from exc
+        raise HTTPException(status_code=502, detail="CloudConvert is temporarily unavailable.") from exc
     if response.status_code >= 400:
         try:
-            detail = response.json().get("message", "La conversion n’a pas pu être démarrée.")
+            detail = response.json().get("message", "Could not start the conversion.")
         except ValueError:
-            detail = "La conversion n’a pas pu être démarrée."
+            detail = "Could not start the conversion."
         raise HTTPException(status_code=502, detail=detail)
     return response.json()
 
@@ -79,10 +79,10 @@ def health():
 async def create_job(payload: CreateJobRequest):
     source, target = payload.source.lower().lstrip("."), payload.target.lower().lstrip(".")
     if (source, target) not in ALLOWED_PAIRS:
-        raise HTTPException(status_code=400, detail="Cette combinaison de formats n’est pas prise en charge.")
+        raise HTTPException(status_code=400, detail="This format combination is not supported.")
     filename = PurePath(payload.filename.replace("\\", "/")).name
     if not filename or filename in {".", ".."}:
-        raise HTTPException(status_code=400, detail="Nom de fichier invalide.")
+        raise HTTPException(status_code=400, detail="Invalid file name.")
 
     stem = re.sub(r"\.[^.]+$", "", filename) or "converti"
     output_name = f"{stem}.{target}"
@@ -109,7 +109,7 @@ async def create_job(payload: CreateJobRequest):
     upload_task = next((task for task in tasks if task.get("name") == "upload-file"), None)
     form = (upload_task or {}).get("result", {}).get("form")
     if not job.get("id") or not form or not form.get("url") or not isinstance(form.get("parameters"), dict):
-        raise HTTPException(status_code=502, detail="CloudConvert n’a pas fourni le formulaire d’envoi.")
+        raise HTTPException(status_code=502, detail="CloudConvert did not return an upload form.")
     return {
         "job_id": job["id"],
         "job_token": _signature(signing_secret, job["id"]),
@@ -122,11 +122,11 @@ async def create_job(payload: CreateJobRequest):
 @app.get("/api/jobs/{job_id}")
 async def get_job(job_id: str, token: str = Query(min_length=64, max_length=64)):
     if not re.fullmatch(r"[A-Za-z0-9-]{16,80}", job_id):
-        raise HTTPException(status_code=404, detail="Tâche introuvable.")
+        raise HTTPException(status_code=404, detail="Job not found.")
     _, signing_secret, base_url = _credentials()
     expected = _signature(signing_secret, job_id)
     if not hmac.compare_digest(expected, token):
-        raise HTTPException(status_code=404, detail="Tâche introuvable.")
+        raise HTTPException(status_code=404, detail="Job not found.")
 
     result = await _cloudconvert_request("GET", f"{base_url}/jobs/{quote(job_id, safe='')}")
     job = result.get("data", {})
